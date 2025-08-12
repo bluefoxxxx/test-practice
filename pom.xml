@@ -74,6 +74,20 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ===== 进阶挑战依赖部分 ===== -->
+        
+        <!-- Spring Boot Redis Starter：提供Redis缓存支持 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        
+        <!-- Spring Boot Cache Starter：提供缓存抽象层 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
         <!-- ===== 测试依赖部分 ===== -->
         
         <!-- Spring Boot Test Starter：包含JUnit 5、Mockito、AssertJ、Hamcrest、Spring Test等 -->
@@ -102,6 +116,26 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ===== 进阶挑战测试依赖 ===== -->
+        
+        <!-- Testcontainers Redis 支持：用于缓存测试（使用通用容器） -->
+        <!-- Redis通过GenericContainer启动，无需专用依赖 -->
+        
+        <!-- Spring Cloud Contract Test：用于契约测试 -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-contract-stub-runner</artifactId>
+            <version>4.1.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Awaitility：用于异步和并发测试，等待条件满足 -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
 

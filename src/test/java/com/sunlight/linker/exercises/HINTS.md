@@ -418,6 +418,242 @@ static Stream<String> provideTestData() { ... }
 .andExpect(jsonPath("$.shortCode").value("abc123"))
 ```
 
+## 🚀 进阶挑战提示
+
+### 练习6：Redis缓存测试
+
+#### 6.1 Redis容器配置
+```java
+@Container
+static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+        .withExposedPorts(6379)
+        .withReuse(true);
+
+@DynamicPropertySource
+static void configureProperties(DynamicPropertyRegistry registry) {
+    // 配置Redis连接
+    registry.add("spring.data.redis.host", redis::getHost);
+    registry.add("spring.data.redis.port", redis::getFirstMappedPort);
+    registry.add("spring.cache.type", () -> "redis");
+}
+```
+
+#### 6.2 缓存功能测试
+```java
+@Test
+void shouldCacheShortLinkQueries() {
+    // Given - 创建短链接
+    ShortLink created = cachedShortLinkService.createShortLink(TEST_LONG_URL);
+    
+    // When - 查询并检查缓存
+    Optional<String> result = cachedShortLinkService.getLongUrl(created.getShortCode());
+    
+    // Then - 验证缓存存在
+    String cacheKey = "shortlink:" + created.getShortCode();
+    assertThat(redisTemplate.hasKey(cacheKey)).isTrue();
+}
+```
+
+#### 6.3 缓存并发测试
+```java
+@Test
+void shouldHandleConcurrentQueriesThreadSafe() {
+    List<CompletableFuture<Optional<String>>> futures = new ArrayList<>();
+    
+    for (int i = 0; i < 10; i++) {
+        futures.add(CompletableFuture.supplyAsync(() -> 
+            cachedShortLinkService.getLongUrl(shortCode)));
+    }
+    
+    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    
+    // 验证所有结果一致
+    futures.forEach(future -> {
+        assertThat(future.join()).isPresent().contains(expectedUrl);
+    });
+}
+```
+
+### 练习7：并发测试
+
+#### 7.1 并发测试工具使用
+```java
+@Test
+void shouldCreateDifferentShortLinksThreadSafe() {
+    ConcurrencyTestUtils.ConcurrentTestResult<ShortLink> result = 
+        ConcurrencyTestUtils.runConcurrentTasks(
+            () -> shortLinkService.createShortLink("https://example.com/" + System.nanoTime()),
+            10,  // 线程数
+            5,   // 每线程任务数
+            30   // 超时秒数
+        );
+    
+    assertThat(result.hasExceptions()).isFalse();
+    assertThat(result.getSuccessCount()).isEqualTo(50);
+}
+```
+
+#### 7.2 竞态条件测试
+```java
+@Test
+void shouldPreventRaceConditionInCustomAliasCreation() {
+    AtomicInteger successCount = new AtomicInteger(0);
+    
+    ConcurrencyTestUtils.runReadWriteConcurrentTest(
+        () -> { // 读任务
+            try {
+                shortLinkService.createShortLink(url1, "popular-alias");
+                successCount.incrementAndGet();
+                return "success";
+            } catch (Exception e) {
+                return e;
+            }
+        },
+        () -> { // 写任务
+            try {
+                shortLinkService.createShortLink(url2, "popular-alias");
+                successCount.incrementAndGet();
+                return "success";
+            } catch (Exception e) {
+                return e;
+            }
+        },
+        5, 5, 2
+    );
+    
+    // 验证只有一个成功
+    await().untilAsserted(() -> {
+        long count = shortLinkRepository.countByShortCode("popular-alias");
+        assertThat(count).isLessThanOrEqualTo(1);
+    });
+}
+```
+
+### 练习8：契约测试
+
+#### 8.1 HTTP契约验证
+```java
+@Test
+void shouldComplyWithCreateSuccessContract() throws Exception {
+    when(shortLinkService.createShortLink(anyString())).thenReturn(testShortLink);
+    
+    String requestBody = """
+        {
+            "longUrl": "https://www.example.com/test"
+        }
+        """;
+    
+    mockMvc.perform(post("/api/v1/links")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(requestBody))
+        .andExpect(status().isCreated())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        // 验证响应字段契约
+        .andExpect(jsonPath("$.id").isNumber())
+        .andExpect(jsonPath("$.shortCode").value(matchesPattern("^[a-zA-Z0-9]+$")))
+        .andExpect(jsonPath("$.longUrl").value(startsWith("https://")))
+        .andExpect(jsonPath("$.isCustomAlias").isBoolean())
+        // 验证响应头契约
+        .andExpect(header().string("Content-Type", "application/json"))
+        .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+}
+```
+
+#### 8.2 错误响应契约
+```java
+@Test
+void shouldComplyWithValidationErrorContract() throws Exception {
+    String invalidRequestBody = """
+        {
+            "longUrl": "not-a-valid-url"
+        }
+        """;
+    
+    mockMvc.perform(post("/api/v1/links")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(invalidRequestBody))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        // 标准错误格式契约
+        .andExpect(jsonPath("$.error").isString())
+        .andExpect(jsonPath("$.message").isString())
+        .andExpect(jsonPath("$.timestamp").isString())
+        .andExpect(jsonPath("$.path").value("/api/v1/links"))
+        .andExpect(jsonPath("$.status").value(400));
+}
+```
+
+#### 8.3 重定向契约验证
+```java
+@Test
+void shouldComplyWithRedirectSuccessContract() throws Exception {
+    when(shortLinkService.getLongUrl("abc123"))
+        .thenReturn(Optional.of("https://www.example.com/target"));
+    
+    mockMvc.perform(get("/s/abc123"))
+        .andExpect(status().isFound())  // 302
+        .andExpect(header().string("Location", "https://www.example.com/target"))
+        .andExpect(header().string("Cache-Control", "no-cache"))
+        .andExpect(content().string(emptyString()));  // 无响应体
+}
+```
+
+## 🔧 进阶调试技巧
+
+### 1. Redis调试
+```java
+// 查看缓存内容
+String cacheKey = "shortlink:" + shortCode;
+Object cached = redisTemplate.opsForValue().get(cacheKey);
+System.out.println("Cached value: " + cached);
+
+// 查看TTL
+Long ttl = redisTemplate.getExpire(cacheKey, TimeUnit.SECONDS);
+System.out.println("TTL: " + ttl + " seconds");
+```
+
+### 2. 并发测试调试
+```java
+// 监控线程状态
+ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+System.out.println("Active threads: " + threadBean.getThreadCount());
+
+// 监控数据库连接
+HikariDataSource dataSource = (HikariDataSource) applicationContext.getBean(DataSource.class);
+System.out.println("Active connections: " + dataSource.getHikariPoolMXBean().getActiveConnections());
+```
+
+### 3. 契约测试调试
+```java
+// 打印完整的HTTP交互
+mockMvc.perform(post("/api/v1/links")...)
+    .andDo(print())  // 打印请求响应详情
+    .andDo(result -> {
+        System.out.println("Response body: " + result.getResponse().getContentAsString());
+        System.out.println("Response headers: " + result.getResponse().getHeaderNames());
+    });
+```
+
+## ⚡ 进阶最佳实践
+
+### 1. 缓存测试
+- 总是在测试前清理缓存状态
+- 使用@DirtiesContext注解隔离缓存影响
+- 测试缓存的TTL和过期策略
+- 验证缓存在异常情况下的行为
+
+### 2. 并发测试
+- 使用足够的线程数和操作次数
+- 验证数据的最终一致性
+- 使用Awaitility等待异步操作完成
+- 监控系统资源使用情况
+
+### 3. 契约测试
+- 保持API响应格式的稳定性
+- 使用JSON Schema验证复杂响应
+- 测试不同HTTP方法的行为
+- 验证错误响应的一致性
+
 ---
 
-**记住：测试是保证代码质量的重要手段，好的测试应该是快速、独立、可重复、自验证的！**
+**记住：进阶测试需要更深入的系统理解和更细致的验证策略。好的进阶测试能够发现系统在复杂场景下的问题，确保生产环境的稳定性！**

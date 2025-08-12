@@ -240,6 +240,17 @@ public interface ShortLinkRepository extends JpaRepository<ShortLink, Long> {
     Long countCustomAliases();
     
     /**
+     * 统计指定短码的数量
+     * 
+     * 【业务价值】：
+     * 用于验证短码的唯一性，支持并发测试验证
+     * 
+     * @param shortCode 要统计的短码
+     * @return 该短码的数量（0或1）
+     */
+    Long countByShortCode(String shortCode);
+    
+    /**
      * 查找指定域名下访问次数最多的短链接
      * 
      * 【业务价值】：
