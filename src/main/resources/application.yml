@@ -1,0 +1,310 @@
+# Quality Gate Linker - 短链接服务配置文件
+# 这是一个用于测试技术栈学习的Spring Boot应用程序配置
+
+# ====================================================================
+# 应用程序基础配置
+# ====================================================================
+spring:
+  application:
+    name: quality-gate-linker
+    
+  # 数据源配置 - 开发环境使用H2内存数据库
+  datasource:
+    url: jdbc:h2:mem:linkerdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  # H2控制台配置（仅开发环境）
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+        
+  # JPA/Hibernate配置
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop  # 开发环境每次重启重建表结构
+    show-sql: true           # 显示SQL语句（便于学习和调试）
+    properties:
+      hibernate:
+        format_sql: true     # 格式化SQL输出
+        use_sql_comments: true
+        generate_statistics: true
+        
+  # Jackson JSON配置
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: true    # 美化JSON输出
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: Asia/Shanghai
+    
+  # 国际化配置
+  messages:
+    basename: messages
+    encoding: UTF-8
+    
+# ====================================================================
+# 服务器配置
+# ====================================================================
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+    
+# ====================================================================
+# 应用程序自定义配置
+# ====================================================================
+app:
+  short-link:
+    # 短链接服务域名（用于生成完整的短链接URL）
+    domain: http://localhost:8080
+    # Base62字符集（可配置化）
+    charset: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    # 默认短码长度
+    default-length: 6
+    # 热门链接阈值
+    hot-link-threshold: 1000
+    
+# ====================================================================
+# 监控和管理配置 - Spring Boot Actuator
+# ====================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+    metrics:
+      enabled: true
+  info:
+    env:
+      enabled: true
+    build:
+      enabled: true
+    git:
+      enabled: true
+      mode: full
+
+# ====================================================================
+# 日志配置
+# ====================================================================
+logging:
+  level:
+    root: INFO
+    com.sunlight.linker: DEBUG          # 应用程序包的日志级别
+    org.springframework.web: DEBUG      # Spring Web相关日志
+    org.hibernate.SQL: DEBUG            # Hibernate SQL日志
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE  # SQL参数日志
+    org.testcontainers: INFO            # Testcontainers日志
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/quality-gate-linker.log
+
+# ====================================================================
+# 应用程序信息（用于Actuator info端点）
+# ====================================================================
+info:
+  app:
+    name: Quality Gate Linker
+    description: 一个高可用的短链接服务 - 测试技术栈学习实践项目
+    version: 1.0.0
+    author: 测试实践学习项目
+  test:
+    pyramid:
+      unit: Base62ConverterTest - 纯单元测试
+      integration: ShortLinkServiceTest - Mock集成测试
+      database: ShortLinkServiceRealDbTest - Testcontainers数据库测试
+      api: ShortLinkControllerTest - MockMvc API测试
+      coverage: Jacoco代码覆盖率分析
+  technologies:
+    framework: Spring Boot 3.2.x
+    language: Java 21
+    database: PostgreSQL / H2
+    testing: JUnit 5, AssertJ, Mockito, Testcontainers
+    build: Maven
+    containerization: Docker (via Testcontainers)
+
+---
+
+# ====================================================================
+# 生产环境配置
+# ====================================================================
+spring:
+  config:
+    activate:
+      on-profile: prod
+      
+  # 生产环境数据源 - PostgreSQL
+  datasource:
+    url: jdbc:postgresql://localhost:5432/linkerprod
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:linker}
+    password: ${DB_PASSWORD:your_secure_password}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      
+  # 生产环境JPA配置
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate  # 生产环境不自动修改表结构
+    show-sql: false       # 生产环境不显示SQL
+    properties:
+      hibernate:
+        format_sql: false
+        generate_statistics: false
+        
+  # 禁用H2控制台
+  h2:
+    console:
+      enabled: false
+
+# 生产环境应用配置
+app:
+  short-link:
+    domain: ${SHORT_LINK_DOMAIN:https://your-domain.com}
+
+# 生产环境日志配置
+logging:
+  level:
+    root: WARN
+    com.sunlight.linker: INFO
+    org.springframework.web: WARN
+    org.hibernate.SQL: WARN
+
+# 生产环境监控配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+---
+
+# ====================================================================
+# 测试环境配置
+# ====================================================================
+spring:
+  config:
+    activate:
+      on-profile: test
+      
+  # 测试环境使用H2内存数据库
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+    
+  # 测试环境JPA配置
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false  # 测试时不显示SQL以减少日志噪音
+    properties:
+      hibernate:
+        format_sql: false
+        generate_statistics: false
+
+# 测试环境日志配置
+logging:
+  level:
+    root: WARN
+    com.sunlight.linker: INFO
+    org.testcontainers: WARN
+    org.springframework: WARN
+    org.hibernate: WARN
+
+---
+
+# ====================================================================
+# 开发环境配置
+# ====================================================================
+spring:
+  config:
+    activate:
+      on-profile: dev
+      
+  # 开发环境可以选择使用PostgreSQL进行更真实的测试
+  datasource:
+    url: jdbc:postgresql://localhost:5432/linkerdev
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update  # 开发环境自动更新表结构
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        generate_statistics: true
+
+# 开发环境应用配置
+app:
+  short-link:
+    domain: http://localhost:8080
+
+# 开发环境完整监控
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # 开发环境暴露所有端点
+  endpoint:
+    health:
+      show-details: always
+
+---
+
+# ====================================================================
+# Docker环境配置
+# ====================================================================
+spring:
+  config:
+    activate:
+      on-profile: docker
+      
+  datasource:
+    url: jdbc:postgresql://postgres:5432/linker
+    driver-class-name: org.postgresql.Driver
+    username: ${POSTGRES_USER:linker}
+    password: ${POSTGRES_PASSWORD:linker}
+    
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+# Docker环境配置
+server:
+  port: 8080
+  
+app:
+  short-link:
+    domain: ${SHORT_LINK_DOMAIN:http://localhost:8080}
