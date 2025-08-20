@@ -1,6 +1,7 @@
 package com.sunlight.linker.exercises.application;
 
 import com.sunlight.linker.application.ShortLinkService;
+import com.sunlight.linker.core.Base62Converter;
 import com.sunlight.linker.domain.ShortLink;
 import com.sunlight.linker.infrastructure.ShortLinkRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,9 +13,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,6 +58,7 @@ class ShortLinkServiceExercise {
      * 提示：使用@Autowired注解
      */
     // TODO: 注入ShortLinkService
+    @Autowired
     private ShortLinkService shortLinkService;
     
     /**
@@ -64,6 +68,7 @@ class ShortLinkServiceExercise {
      * 提示：使用@MockBean注解
      */
     // TODO: 创建ShortLinkRepository的Mock
+    @MockBean
     private ShortLinkRepository shortLinkRepository;
     
     /**
@@ -84,9 +89,11 @@ class ShortLinkServiceExercise {
     void setUp() {
         // TODO: 创建测试用的ShortLink对象
         // 提示：使用createShortLinkWithId辅助方法
+        testShortLink = createShortLinkWithId(1L, VALID_LONG_URL, VALID_SHORT_CODE);
         
         // TODO: 重置所有Mock对象的状态
         // 提示：使用reset()方法
+        reset(shortLinkRepository);
     }
     
     /**
@@ -114,18 +121,46 @@ class ShortLinkServiceExercise {
             // TODO: Given - 准备测试数据和Mock行为
             // 模拟查询不存在的长链接
             // when(shortLinkRepository.findByLongUrl(...)).thenReturn(...);
+            when(shortLinkRepository.findByLongUrl(anyString())).thenReturn(Optional.empty());
             
             // 模拟保存操作，注意需要两次保存
             // 第一次保存：返回带ID的临时对象
+            ShortLink savedWithId = createShortLinkWithId(1L, VALID_LONG_URL, "temporary");
             // 第二次保存：返回最终对象
-            
+            ShortLink finalLink = createShortLinkWithId(1L, VALID_LONG_URL, Base62Converter.encode(1L));
+
+            when(shortLinkRepository.save(any(ShortLink.class)))
+                    .thenReturn(savedWithId)    // 第一次调用 save 时，返回这个
+                    .thenReturn(finalLink);     // 第二次调用 save 时，返回这个
             // TODO: When - 执行被测试的方法
             // ShortLink result = ...
-            
+            ShortLink result = shortLinkService.createShortLink(VALID_LONG_URL);
             // TODO: Then - 验证结果和方法调用
             // 验证返回对象的属性
             // 验证Repository方法的调用次数
             // 使用ArgumentCaptor验证保存的数据
+            assertThat(result).isNotNull();
+            assertThat(result.getShortCode()).isEqualTo(Base62Converter.encode(1L));
+
+            //创建一个 ShortLink 类型的参数捕获器
+            ArgumentCaptor<ShortLink> linkCaptor = ArgumentCaptor.forClass(ShortLink.class);
+
+            // 验证 save 方法被调用了2次，并捕获传入的参数
+            verify(shortLinkRepository, times(2)).save(linkCaptor.capture());
+
+            // 获取所有被捕获的参数
+            List<ShortLink> capturedLinks = linkCaptor.getAllValues();
+
+            // 对捕获到的参数进行精确断言
+            assertThat(capturedLinks).hasSize(2); // 确保捕获到了2个参数
+
+            ShortLink firstSaveArgument = capturedLinks.get(0);
+            assertThat(firstSaveArgument.getLongUrl()).isEqualTo(VALID_LONG_URL);
+            assertThat(firstSaveArgument.getShortCode()).isEqualTo("temporary"); // 验证第一次保存时，短码是临时的
+
+            ShortLink secondSaveArgument = capturedLinks.get(1);
+            assertThat(secondSaveArgument.getId()).isEqualTo(1L); // 验证第二次保存时，ID已经存在
+            assertThat(secondSaveArgument.getShortCode()).isEqualTo(Base62Converter.encode(1L)); // 验证第二次保存时，短码已被更新
         }
 
         /**
@@ -138,6 +173,15 @@ class ShortLinkServiceExercise {
         void shouldReturnExistingShortLinkForDuplicateUrl() {
             // TODO: 实现重复URL测试
             // 提示：mock findByLongUrl返回已存在的记录
+            when(shortLinkRepository.findByLongUrl(VALID_LONG_URL)).thenReturn(Optional.of(testShortLink));
+            ShortLink result = shortLinkService.createShortLink(VALID_LONG_URL);
+            // 验证返回值
+            assertThat(result).isNotNull();
+            assertThat(result.getId()).isEqualTo(testShortLink.getId());
+            assertThat(result.getShortCode()).isEqualTo(testShortLink.getShortCode());
+            // 验证交互
+            verify(shortLinkRepository, times(1)).findByLongUrl(VALID_LONG_URL);
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
         }
 
         /**
@@ -150,6 +194,20 @@ class ShortLinkServiceExercise {
         void shouldCreateShortLinkWithCustomAlias() {
             // TODO: 实现自定义别名测试
             // 注意：需要验证isCustomAlias字段设置为true
+            when(shortLinkRepository.existsByShortCode(CUSTOM_ALIAS)).thenReturn(false);
+
+            ShortLink customLink = new ShortLink(VALID_LONG_URL, CUSTOM_ALIAS);
+            customLink.setIsCustomAlias(true);
+            // 手动设置id
+            ReflectionTestUtils.setField(customLink, "id", 2L);
+            when(shortLinkRepository.save(any(ShortLink.class))).thenReturn(customLink);
+
+            ShortLink result = shortLinkService.createCustomShortLink(VALID_LONG_URL, CUSTOM_ALIAS, "A custom link description");
+            // 验证结果
+            assertThat(result).isNotNull();
+            assertThat(result.getLongUrl()).isEqualTo(VALID_LONG_URL);
+            assertThat(result.getShortCode()).isEqualTo(CUSTOM_ALIAS);
+            assertThat(result.getIsCustomAlias()).isTrue();
         }
     }
 
@@ -171,10 +229,18 @@ class ShortLinkServiceExercise {
             // TODO: 实现成功获取测试
             // 步骤：
             // 1. Mock Repository.findByShortCode() 返回存在的记录
+            when(shortLinkRepository.findByShortCode(VALID_SHORT_CODE))
+                    .thenReturn(Optional.of(testShortLink));
             // 2. Mock Repository.save() 更新访问计数
+            when(shortLinkRepository.save(any(ShortLink.class))).thenAnswer(invocation -> invocation.getArgument(0));
             // 3. 调用Service.getLongUrl()
+            Optional<String> result = shortLinkService.getLongUrl(VALID_SHORT_CODE);
             // 4. 验证返回的Optional包含正确的URL
+            assertThat(result).isPresent(); // 断言 Optional 不是空的
+            assertThat(result).contains(VALID_LONG_URL); // 断言 Optional 包含期望的长链接
             // 5. 验证访问计数被正确更新
+            verify(shortLinkRepository, times(1)).findByShortCode(VALID_SHORT_CODE);
+            verify(shortLinkRepository, times(1)).save(any(ShortLink.class));
         }
 
         /**
@@ -186,6 +252,16 @@ class ShortLinkServiceExercise {
         @DisplayName("不存在的短码应该返回空Optional")
         void shouldReturnEmptyForNonExistentShortCode() {
             // TODO: 实现短码不存在测试
+            String nonExistentCode = "non-existent-code";
+            when(shortLinkRepository.findByShortCode(nonExistentCode))
+                    .thenReturn(Optional.empty());
+
+            Optional<String> result = shortLinkService.getLongUrl(nonExistentCode);
+
+            // 验证返回的是一个空的 Optional
+            assertThat(result).isEmpty();
+
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
         }
 
         /**
@@ -198,7 +274,28 @@ class ShortLinkServiceExercise {
         @DisplayName("应该正确更新访问计数")
         void shouldUpdateAccessCountCorrectly() {
             // TODO: 实现访问计数更新测试
-            // 重点：使用ArgumentCaptor验证保存的对象
+            // 记录初始访问次数
+            long initialAccessCount = testShortLink.getAccessCount();
+
+            when(shortLinkRepository.findByShortCode(VALID_SHORT_CODE))
+                    .thenReturn(Optional.of(testShortLink));
+            when(shortLinkRepository.save(any(ShortLink.class))).thenReturn(testShortLink);
+
+            shortLinkService.getLongUrl(VALID_SHORT_CODE);
+
+            // 创建一个参数捕获器
+            ArgumentCaptor<ShortLink> linkCaptor = ArgumentCaptor.forClass(ShortLink.class);
+
+            // 验证 save 方法被调用，并捕获其参数
+            verify(shortLinkRepository).save(linkCaptor.capture());
+
+            // 获取被捕获的参数对象
+            ShortLink capturedLink = linkCaptor.getValue();
+
+            // 断言访问次数是否正确增加了 1
+            assertThat(capturedLink.getAccessCount())
+                    .as("访问次数应该增加 1")
+                    .isEqualTo(initialAccessCount + 1);
         }
     }
 
@@ -220,6 +317,15 @@ class ShortLinkServiceExercise {
             // TODO: 实现别名可用性检查
             // 测试别名不存在时返回true
             // 测试别名已存在时返回false
+            String availableAlias = "availableAlias";
+            when(shortLinkRepository.existsByShortCode(availableAlias)).thenReturn(false);
+
+            assertThat(shortLinkService.isShortCodeAvailable(availableAlias)).isTrue();
+
+            String occupiedAlias = "occupiedAlias";
+            when(shortLinkRepository.existsByShortCode(occupiedAlias)).thenReturn(true);
+
+            assertThat(shortLinkService.isShortCodeAvailable(occupiedAlias)).isFalse();
         }
 
         /**
@@ -232,6 +338,16 @@ class ShortLinkServiceExercise {
         void shouldThrowExceptionForDuplicateAlias() {
             // TODO: 实现重复别名异常测试
             // 提示：使用assertThatThrownBy()
+
+            when(shortLinkRepository.existsByShortCode(CUSTOM_ALIAS)).thenReturn(true);
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createCustomShortLink(VALID_LONG_URL, CUSTOM_ALIAS, "description");
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("自定义别名已被占用");
+
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
         }
     }
 
@@ -251,6 +367,16 @@ class ShortLinkServiceExercise {
         @DisplayName("应该正确检查短码可用性")
         void shouldCheckShortCodeAvailability() {
             // TODO: 实现短码可用性检查
+            // 场景1: 短码可用 (不存在)
+            String availableCode = "newcode123";
+            when(shortLinkRepository.existsByShortCode(availableCode)).thenReturn(false);
+            assertThat(shortLinkService.isShortCodeAvailable(availableCode)).isTrue();
+
+            // 场景2: 短码不可用 (已存在)
+            String occupiedCode = "existingcode456";
+            when(shortLinkRepository.existsByShortCode(occupiedCode)).thenReturn(true);
+
+            assertThat(shortLinkService.isShortCodeAvailable(occupiedCode)).isFalse();
         }
     }
 
@@ -271,6 +397,26 @@ class ShortLinkServiceExercise {
         void shouldReturnLinksInTimeRange() {
             // TODO: 实现时间范围查询测试
             // 提示：需要创建多个测试数据，包含不同的创建时间
+
+            LocalDateTime startTime = LocalDateTime.of(2025, 8, 1, 0, 0);
+            LocalDateTime endTime = LocalDateTime.of(2025, 8, 31, 23, 59);
+
+            List<ShortLink> mockLinks = Arrays.asList(
+                    createShortLinkWithId(10L, "urlA", "linkA"),
+                    createShortLinkWithId(11L, "urlB", "linkB")
+            );
+
+            when(shortLinkRepository.findByCreatedAtBetween(startTime, endTime))
+                    .thenReturn(mockLinks);
+
+            //调用被测试的方法
+            List<ShortLink> result = shortLinkService.getLinksCreatedBetween(startTime, endTime);
+
+            // 验证返回的列表
+            assertThat(result)
+                    .isNotNull()
+                    .hasSize(2)
+                    .containsExactlyInAnyOrderElementsOf(mockLinks); // 验证内容是否一致
         }
 
         /**
@@ -282,6 +428,17 @@ class ShortLinkServiceExercise {
         @DisplayName("无数据时应该返回空列表")
         void shouldReturnEmptyListWhenNoDataInRange() {
             // TODO: 实现空结果测试
+            LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+            LocalDateTime endTime = LocalDateTime.of(2025, 1, 31, 23, 59);
+
+            when(shortLinkRepository.findByCreatedAtBetween(any(LocalDateTime.class), any(LocalDateTime.class)))
+                    .thenReturn(Collections.emptyList());
+
+            List<ShortLink> result = shortLinkService.getLinksCreatedBetween(startTime, endTime);
+
+            assertThat(result)
+                    .isNotNull()
+                    .isEmpty();
         }
     }
 
@@ -302,6 +459,20 @@ class ShortLinkServiceExercise {
         void shouldReturnCorrectSystemStats() {
             // TODO: 实现系统统计测试
             // 需要mock Repository的count()方法
+            long totalLinks = 100L;
+            long totalAccess = 5000L;
+            long customAliases = 10L;
+
+            when(shortLinkRepository.count()).thenReturn(totalLinks);
+            when(shortLinkRepository.getTotalAccessCount()).thenReturn(totalAccess);
+            when(shortLinkRepository.countCustomAliases()).thenReturn(customAliases);
+
+            ShortLinkService.SystemStats result = shortLinkService.getSystemStats();
+
+            assertThat(result).isNotNull();
+            assertThat(result.getTotalLinks()).isEqualTo(totalLinks);
+            assertThat(result.getTotalAccess()).isEqualTo(totalAccess);
+            assertThat(result.getCustomAliases()).isEqualTo(customAliases);
         }
     }
 
@@ -312,11 +483,8 @@ class ShortLinkServiceExercise {
      * 提示：使用ReflectionTestUtils.setField()设置私有字段ID
      */
     private ShortLink createShortLinkWithId(Long id, String longUrl, String shortCode) {
-        // TODO: 创建ShortLink对象并设置ID
-        // ShortLink link = new ShortLink(longUrl, shortCode);
-        // 使用Spring测试工具类设置私有字段ID
-        // org.springframework.test.util.ReflectionTestUtils.setField(link, "id", id);
-        // return link;
-        return null; // 替换为实际实现
+        ShortLink link = new ShortLink(longUrl, shortCode);
+        ReflectionTestUtils.setField(link, "id", id);
+        return link;
     }
 }
