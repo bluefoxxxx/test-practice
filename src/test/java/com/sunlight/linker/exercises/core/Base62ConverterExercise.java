@@ -4,12 +4,15 @@ import com.sunlight.linker.core.Base62Converter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.*;
@@ -63,14 +66,10 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("应该正确编码基础有效值")
         void shouldEncodeValidBasicValues() {
-            // TODO: 实现测试0的编码
-            // assertThat(Base62Converter.encode(0))...
-            
-            // TODO: 实现测试1的编码
-            
-            // TODO: 实现测试61的编码
-            
-            // TODO: 实现测试62的编码
+            assertThat(Base62Converter.encode(0)).isEqualTo("0");
+            assertThat(Base62Converter.encode(1)).isEqualTo("1");
+            assertThat(Base62Converter.encode(61)).isEqualTo("Z");
+            assertThat(Base62Converter.encode(62)).isEqualTo("10");
         }
 
         /**
@@ -85,8 +84,7 @@ class Base62ConverterExercise {
         @ValueSource(longs = {0, 1, 10, 61, 62, 100, 1000, 10000})
         @DisplayName("参数化测试 - 编码结果非空验证")
         void shouldReturnNonEmptyStringForValidIds(long id) {
-            // TODO: 实现参数化测试
-            // 提示：使用assertThat().isNotNull().isNotEmpty()
+            assertThat(Base62Converter.encode(id)).isNotNull().isNotEmpty();
         }
 
         /**
@@ -102,11 +100,11 @@ class Base62ConverterExercise {
             "35, z",
             "61, Z",
             "62, 10",
-            "3843, zz"
+            "3843, ZZ"
         })
         @DisplayName("CSV参数化测试 - 已知编码对验证")
         void shouldEncodeKnownValues(long id, String expectedCode) {
-            // TODO: 实现CSV参数化测试
+            assertThat(Base62Converter.encode(id)).isEqualTo(expectedCode);
         }
 
         /**
@@ -118,8 +116,17 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("负数应该抛出异常")
         void shouldThrowExceptionForNegativeNumbers() {
-            // TODO: 实现异常测试
-            // 测试 -1, -10, -100 等负数
+            assertThatThrownBy(() -> Base62Converter.encode(-1))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("ID不能为负数");
+
+            assertThatThrownBy(() -> Base62Converter.encode(-10))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("ID不能为负数");
+
+            assertThatThrownBy(() -> Base62Converter.encode(-100))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("ID不能为负数");
         }
     }
 
@@ -143,7 +150,10 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("应该正确解码基础有效值")
         void shouldDecodeValidBasicValues() {
-            // TODO: 实现基础解码测试
+            assertThat(Base62Converter.decode("0")).isEqualTo(0);
+            assertThat(Base62Converter.decode("1")).isEqualTo(1);
+            assertThat(Base62Converter.decode("Z")).isEqualTo(61);
+            assertThat(Base62Converter.decode("10")).isEqualTo(62);
         }
 
         /**
@@ -158,11 +168,11 @@ class Base62ConverterExercise {
             "z, 35", 
             "Z, 61",
             "10, 62",
-            "zz, 3843"
+            "ZZ, 3843"
         })
         @DisplayName("CSV参数化解码测试")
         void shouldDecodeKnownValues(String code, long expectedId) {
-            // TODO: 实现参数化解码测试
+            assertThat(Base62Converter.decode(code)).isEqualTo(expectedId);
         }
 
         /**
@@ -176,11 +186,17 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("异常输入应该抛出相应异常")
         void shouldThrowExceptionForInvalidInput() {
-            // TODO: 测试null输入
-            
-            // TODO: 测试空字符串
-            
-            // TODO: 测试非法字符（如特殊符号）
+            assertThatThrownBy(() -> Base62Converter.decode(null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("编码字符串不能为null");
+
+            assertThatThrownBy(() -> Base62Converter.decode(""))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("编码字符串不能为空");
+
+            assertThatThrownBy(() -> Base62Converter.decode("123++"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("非法的Base62字符");
         }
 
         /**
@@ -193,7 +209,8 @@ class Base62ConverterExercise {
         @MethodSource("provideInvalidStrings")
         @DisplayName("MethodSource参数化异常测试")
         void shouldThrowExceptionForInvalidStrings(String invalidString) {
-            // TODO: 实现MethodSource参数化异常测试
+            assertThatThrownBy(() -> Base62Converter.decode(invalidString))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
 
         /**
@@ -201,9 +218,12 @@ class Base62ConverterExercise {
          * 提示：返回Stream<Arguments>或Stream<String>
          */
         static Stream<String> provideInvalidStrings() {
-            // TODO: 返回包含非法字符的测试字符串
             // 例如：包含空格、特殊符号、中文字符等
-            return null; // 替换为实际实现
+            return Stream.of(
+                    "hello world",
+                    "123@qq.com",
+                    "尼豪"
+            );
         }
     }
 
@@ -223,8 +243,10 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("编码解码往返应该得到原始值")
         void shouldReturnOriginalValueAfterRoundTrip() {
-            // TODO: 选择一些代表性的值进行往返测试
-            // 提示：encode(id) -> decode(encoded) -> 应该等于原始id
+            assertThat(Base62Converter.decode(Base62Converter.encode(0))).isEqualTo(0);
+            assertThat(Base62Converter.decode(Base62Converter.encode(1))).isEqualTo(1);
+            assertThat(Base62Converter.decode(Base62Converter.encode(35))).isEqualTo(35);
+            assertThat(Base62Converter.decode(Base62Converter.encode(3843))).isEqualTo(3843);
         }
 
         /**
@@ -236,7 +258,7 @@ class Base62ConverterExercise {
         @ValueSource(longs = {0, 1, 10, 35, 61, 62, 100, 1000, 999999})
         @DisplayName("参数化往返测试")
         void shouldMaintainValueThroughRoundTrip(long originalId) {
-            // TODO: 实现参数化往返测试
+            assertThat(Base62Converter.decode(Base62Converter.encode(originalId))).isEqualTo(originalId);
         }
 
         /**
@@ -248,8 +270,12 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("边界值往返测试")
         void shouldHandleBoundaryValuesCorrectly() {
-            // TODO: 实现边界值往返测试
-            // 注意：Long.MAX_VALUE需要特殊处理
+
+            long[] values = {0, 1, 61, 62, Long.MAX_VALUE - 1, Long.MAX_VALUE};
+
+            for(long value : values) {
+                assertThat(Base62Converter.decode(Base62Converter.encode(value))).isEqualTo(value);
+            }
         }
     }
 
@@ -268,9 +294,27 @@ class Base62ConverterExercise {
          */
         @Test
         @DisplayName("字符到数值的映射测试")
-        void shouldMapCharactersToValuesCorrectly() {
+        void shouldMapCharactersToValuesCorrectly() throws Exception {
             // TODO: 如果有公开的辅助方法，进行测试
             // 这个练习可以根据实际的Base62Converter实现调整
+            Method getCharValueMethod = Base62Converter.class.getDeclaredMethod("getCharValue", char.class);
+
+            getCharValueMethod.setAccessible(true);
+
+            assertThat((Integer) getCharValueMethod.invoke(null, '0')).isEqualTo(0);
+            assertThat((Integer) getCharValueMethod.invoke(null, '9')).isEqualTo(9);
+            assertThat((Integer) getCharValueMethod.invoke(null, 'a')).isEqualTo(10);
+            assertThat((Integer) getCharValueMethod.invoke(null, 'z')).isEqualTo(35);
+            assertThat((Integer) getCharValueMethod.invoke(null, 'A')).isEqualTo(36);
+            assertThat((Integer) getCharValueMethod.invoke(null, 'Z')).isEqualTo(61);
+
+            // 测试非法字符应该抛出异常
+            // 当被调用的方法内部抛出异常时，反射会把它包装在 InvocationTargetException 里
+            assertThatThrownBy(() -> getCharValueMethod.invoke(null, '-'))
+                    .isInstanceOf(InvocationTargetException.class)
+                    .getCause() // 获取内部异常
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("非法的Base62字符");
         }
     }
 
@@ -290,8 +334,18 @@ class Base62ConverterExercise {
         @Test
         @DisplayName("大数值编码测试")
         void shouldHandleLargeNumbers() {
-            // TODO: 测试大数值
-            // 提示：可以测试Long.MAX_VALUE, Long.MAX_VALUE-1等
+            // 测试 long 类型最大值
+            long maxValue = Long.MAX_VALUE;
+            String encodedMax = Base62Converter.encode(maxValue);
+            // 基本测试
+            assertThat(encodedMax).isNotNull().isNotEmpty();
+            System.out.println("Long.MAX_VALUE (" + maxValue + ") -> Base62: " + encodedMax);
+            // 往返测试
+            assertThat(Base62Converter.decode(encodedMax))
+                    .isEqualTo(maxValue);
+
+            // 测试 Long.MAX_VALUE - 1
+            assertThat(Base62Converter.decode(Base62Converter.encode(Long.MAX_VALUE - 1))).isEqualTo(Long.MAX_VALUE - 1);
         }
 
         /**
@@ -302,9 +356,12 @@ class Base62ConverterExercise {
          */
         @Test
         @DisplayName("基础性能测试")
+        @Timeout(1)
         void shouldPerformReasonablyFast() {
-            // TODO: 进行简单的性能测试
-            // 可以测试大量编码/解码操作的耗时
+            // 测试大量编码/解码操作的耗时
+            for(int i = 0; i < 10000; i++) {
+                Base62Converter.decode(Base62Converter.encode(i));
+            }
         }
     }
 }
