@@ -13,10 +13,13 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -61,6 +64,7 @@ class ShortLinkControllerExercise {
      * 提示：使用@Autowired注解
      */
     // TODO: 注入MockMvc
+    @Autowired
     private MockMvc mockMvc;
     
     /**
@@ -70,6 +74,7 @@ class ShortLinkControllerExercise {
      * 提示：使用@MockBean注解
      */
     // TODO: 创建ShortLinkService的Mock
+    @MockBean
     private ShortLinkService shortLinkService;
     
     /**
@@ -78,6 +83,7 @@ class ShortLinkControllerExercise {
      * TODO: 注入ObjectMapper用于JSON操作
      */
     // TODO: 注入ObjectMapper
+    @Autowired
     private ObjectMapper objectMapper;
     
     /**
@@ -97,7 +103,9 @@ class ShortLinkControllerExercise {
     @BeforeEach
     void setUp() {
         // TODO: 创建测试用的ShortLink对象
+        testShortLink = createTestShortLink();
         // TODO: 重置Mock对象状态
+        reset(shortLinkService);
     }
     
     /**
@@ -123,20 +131,18 @@ class ShortLinkControllerExercise {
         @DisplayName("成功创建短链接应该返回201和短链接信息")
         void shouldCreateShortLinkSuccessfully() throws Exception {
             // TODO: Given - 准备Mock数据
-            // when(shortLinkService.createShortLink(anyString())).thenReturn(testShortLink);
-            
+            when(shortLinkService.createShortLink(anyString())).thenReturn(testShortLink);
             // TODO: 创建请求体JSON
-            // String requestJson = "{\"longUrl\":\"" + VALID_LONG_URL + "\"}";
-            
+            String requestJson = "{\"longUrl\":\"" + VALID_LONG_URL + "\"}";
             // TODO: When & Then - 执行请求并验证响应
-            // mockMvc.perform(post(API_BASE_PATH)
-            //         .contentType(MediaType.APPLICATION_JSON)
-            //         .content(requestJson))
-            //     .andExpect(status().isCreated())
-            //     .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-            //     .andExpect(jsonPath("$.shortCode").value(VALID_SHORT_CODE))
-            //     .andExpect(jsonPath("$.longUrl").value(VALID_LONG_URL))
-            //     .andExpect(jsonPath("$.isCustomAlias").value(false));
+             mockMvc.perform(post(API_BASE_PATH)
+                     .contentType(MediaType.APPLICATION_JSON)
+                     .content(requestJson))
+                 .andExpect(status().isCreated())
+                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                 .andExpect(jsonPath("$.shortCode").value(VALID_SHORT_CODE))
+                 .andExpect(jsonPath("$.longUrl").value(VALID_LONG_URL))
+                 .andExpect(jsonPath("$.isCustomAlias").value(false));
         }
 
         /**
@@ -149,6 +155,30 @@ class ShortLinkControllerExercise {
         void shouldCreateShortLinkWithCustomAlias() throws Exception {
             // TODO: 实现自定义别名创建测试
             // 请求体应包含longUrl和customAlias字段
+            final String CUSTOM_ALIAS = "my-custom-link";
+            ShortLink customShortLink = new ShortLink(VALID_LONG_URL, CUSTOM_ALIAS, "A custom link");
+            customShortLink.setIsCustomAlias(true);
+            // 模拟数据库已为其生成ID和时间戳
+            ReflectionTestUtils.setField(customShortLink, "id", 2L);
+            ReflectionTestUtils.setField(customShortLink, "createdAt", LocalDateTime.now());
+
+            when(shortLinkService.createCustomShortLink(eq(VALID_LONG_URL), eq(CUSTOM_ALIAS), any()))
+                    .thenReturn(customShortLink);
+
+            String requestJson = "{\"longUrl\":\"" + VALID_LONG_URL + "\", \"customAlias\":\"" + CUSTOM_ALIAS + "\"}";
+
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestJson))
+                    .andExpect(status().isCreated())
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$.shortCode").value(CUSTOM_ALIAS)) // 验证返回的 shortCode 是自定义的别名
+                    .andExpect(jsonPath("$.isCustomAlias").value(true));
+
+            // 验证调用了正确的 service 方法
+            verify(shortLinkService, times(1)).createCustomShortLink(eq(VALID_LONG_URL), eq(CUSTOM_ALIAS), any());
+            // 确保创建普通链接的方法没有被调用
+            verify(shortLinkService, never()).createShortLink(anyString());
         }
 
         /**
@@ -159,11 +189,31 @@ class ShortLinkControllerExercise {
         @Test
         @DisplayName("无效请求应该返回400错误")
         void shouldReturn400ForInvalidRequests() throws Exception {
-            // TODO: 测试空请求体
-            
-            // TODO: 测试缺少longUrl字段
-            
-            // TODO: 测试无效URL格式
+            // 因为缺少必需的 'longUrl' 字段，违反了 @NotBlank 约束，应返回 400
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest()); // 验证状态码为 400
+
+            // 发送一个 'longUrl' 字段为空字符串的请求
+            // 应返回 400
+            String emptyUrlJson = "{\"longUrl\":\"\"}";
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(emptyUrlJson))
+                    .andExpect(status().isBadRequest());
+
+            // 'longUrl' 字段的值不是一个有效的URL格式
+            // 预期：这将在 Service 层被验证，模拟 Service 层抛出异常来测试 Controller 的反应
+            String invalidUrl = "this-is-not-a-valid-url";
+            when(shortLinkService.createShortLink(invalidUrl))
+                    .thenThrow(new IllegalArgumentException("无效的URL格式"));
+
+            String invalidUrlJson = "{\"longUrl\":\"" + invalidUrl + "\"}";
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(invalidUrlJson))
+                    .andExpect(status().isBadRequest()); // 验证 Controller 能正确捕获 Service 异常并返回 400
         }
 
         /**
@@ -176,6 +226,11 @@ class ShortLinkControllerExercise {
         void shouldReturn415ForWrongContentType() throws Exception {
             // TODO: 实现Content-Type测试
             // 发送text/plain类型的请求
+            // 将 Content-Type 设置为 'text/plain'
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.TEXT_PLAIN)
+                            .content("this is just plain text")) // 发送一些文本内容
+                    .andExpect(status().isUnsupportedMediaType()); // 验证：HTTP 响应状态码必须是 415
         }
     }
 
@@ -195,11 +250,18 @@ class ShortLinkControllerExercise {
         @DisplayName("应该成功获取短链接信息")
         void shouldGetShortLinkInfoSuccessfully() throws Exception {
             // TODO: Given - Mock Service返回短链接信息
-            
+            when(shortLinkService.getShortLinkInfo(VALID_SHORT_CODE))
+                    .thenReturn(Optional.of(testShortLink));
             // TODO: When & Then - 执行GET请求并验证
             // 验证状态码200
             // 验证JSON响应格式
             // 验证所有字段值
+            mockMvc.perform(get(API_BASE_PATH + "/" + VALID_SHORT_CODE))
+                    .andExpect(status().isOk()) // HTTP 状态码是 200 OK
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON)) //响应内容类型为 JSON
+                    .andExpect(jsonPath("$.id").value(testShortLink.getId()))
+                    .andExpect(jsonPath("$.longUrl").value(testShortLink.getLongUrl()))
+                    .andExpect(jsonPath("$.shortCode").value(testShortLink.getShortCode()));
         }
 
         /**
@@ -211,8 +273,13 @@ class ShortLinkControllerExercise {
         @DisplayName("不存在的短码应该返回404")
         void shouldReturn404ForNonExistentShortCode() throws Exception {
             // TODO: 实现404测试
+            final String nonExistentCode = "nonexistentcode";
             // Mock Service返回null
+            when(shortLinkService.getShortLinkInfo(nonExistentCode))
+                    .thenReturn(Optional.empty());
             // 验证404状态码
+            mockMvc.perform(get(API_BASE_PATH + "/" + nonExistentCode))
+                    .andExpect(status().isNotFound());
         }
     }
 
@@ -233,11 +300,22 @@ class ShortLinkControllerExercise {
         void shouldGetHotLinks() throws Exception {
             // TODO: Given - 准备热门链接列表数据
             // List<ShortLink> hotLinks = Arrays.asList(...);
-            
+            ShortLink hotLink2 = new ShortLink("https://www.another-example.com", "hot456");
+            ReflectionTestUtils.setField(hotLink2, "id", 2L);
+            hotLink2.setAccessCount(2000L);
+            List<ShortLink> hotLinks = Arrays.asList(testShortLink, hotLink2);
             // TODO: When & Then - 测试热门链接API
+            when(shortLinkService.getHotLinks(anyLong())).thenReturn(hotLinks);
             // 验证状态码200
             // 验证返回列表格式
             // 验证列表元素内容
+            mockMvc.perform(get(API_BASE_PATH + "/hot"))
+                    .andExpect(status().isOk()) // 状态码为 200 OK
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON)) // 内容类型为 JSON
+                    .andExpect(jsonPath("$", hasSize(2)))
+                    .andExpect(jsonPath("$[0].shortCode").value(testShortLink.getShortCode()))
+                    .andExpect(jsonPath("$[0].longUrl").value(testShortLink.getLongUrl()))
+                    .andExpect(jsonPath("$[1].shortCode").value(hotLink2.getShortCode()));
         }
 
         /**
@@ -250,6 +328,14 @@ class ShortLinkControllerExercise {
         void shouldHandleMinAccessCountParameter() throws Exception {
             // TODO: 实现参数处理测试
             // 测试带参数的请求：/api/v1/links/hot?minAccessCount=10
+            long minAccessCount = 10L;
+            when(shortLinkService.getHotLinks(minAccessCount)).thenReturn(Collections.emptyList());
+
+            mockMvc.perform(get(API_BASE_PATH + "/hot")
+                            .param("minAccessCount", String.valueOf(minAccessCount)))
+                    .andExpect(status().isOk()); // 验证状态码为 200 OK
+
+            verify(shortLinkService, times(1)).getHotLinks(minAccessCount);
         }
     }
 
@@ -270,6 +356,25 @@ class ShortLinkControllerExercise {
         void shouldGetLinksInTimeRange() throws Exception {
             // TODO: 实现时间范围查询测试
             // URL: /api/v1/links/created-between?start=2023-01-01T00:00:00&end=2023-12-31T23:59:59
+            String startTimeStr = "2023-01-01T00:00:00";
+            String endTimeStr = "2023-12-31T23:59:59";
+
+            LocalDateTime startTime = LocalDateTime.parse(startTimeStr);
+            LocalDateTime endTime = LocalDateTime.parse(endTimeStr);
+
+            when(shortLinkService.getLinksCreatedBetween(startTime, endTime))
+                    .thenReturn(Collections.singletonList(testShortLink));
+
+            mockMvc.perform(get(API_BASE_PATH + "/created-between")
+                            .param("start", startTimeStr)
+                            .param("end", endTimeStr))
+                    .andExpect(status().isOk()) // 验证状态码 200 OK
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$", hasSize(1))) // 验证返回的数组包含一个元素
+                    .andExpect(jsonPath("$[0].shortCode").value(testShortLink.getShortCode()));
+
+            // 确认 service 方法是被使用正确的 LocalDateTime 对象调用的
+            verify(shortLinkService, times(1)).getLinksCreatedBetween(startTime, endTime);
         }
 
         /**
@@ -281,6 +386,10 @@ class ShortLinkControllerExercise {
         @DisplayName("无效时间格式应该返回400错误")
         void shouldReturn400ForInvalidTimeFormat() throws Exception {
             // TODO: 实现无效时间格式测试
+            mockMvc.perform(get(API_BASE_PATH + "/created-between")
+                            .param("start", "not-a-valid-date") // 提供无效的日期格式
+                            .param("end", "2023-12-31T23:59:59"))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -302,6 +411,14 @@ class ShortLinkControllerExercise {
             // TODO: 实现可用性检查测试
             // Mock Service返回true
             // 验证JSON响应：{"available": true}
+            String availableCode = "availablecode";
+            when(shortLinkService.isShortCodeAvailable(availableCode)).thenReturn(true);
+
+            mockMvc.perform(get(API_BASE_PATH + "/check-availability")
+                            .param("shortCode", availableCode))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.available").value(true))
+                    .andExpect(jsonPath("$.shortCode").value(availableCode));
         }
 
         /**
@@ -313,6 +430,13 @@ class ShortLinkControllerExercise {
         @DisplayName("已占用短码应该返回false")
         void shouldReturnFalseForOccupiedShortCode() throws Exception {
             // TODO: 实现已占用短码测试
+            String occupiedCode = "occupiedcode";
+            when(shortLinkService.isShortCodeAvailable(occupiedCode)).thenReturn(false);
+
+            mockMvc.perform(get(API_BASE_PATH + "/check-availability")
+                            .param("shortCode", occupiedCode))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.available").value(false));
         }
 
         /**
@@ -324,6 +448,8 @@ class ShortLinkControllerExercise {
         @DisplayName("缺少shortCode参数应该返回400错误")
         void shouldReturn400ForMissingParameter() throws Exception {
             // TODO: 实现参数缺失测试
+            mockMvc.perform(get(API_BASE_PATH + "/check-availability"))
+                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -345,6 +471,16 @@ class ShortLinkControllerExercise {
             // TODO: 实现系统统计测试
             // 准备统计数据Mock
             // 验证JSON响应格式
+            ShortLinkService.SystemStats stats = new ShortLinkService.SystemStats(100L, 5000L, 20L);
+            when(shortLinkService.getSystemStats()).thenReturn(stats);
+
+            // When & Then
+            mockMvc.perform(get("/api/v1/stats"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$.totalLinks").value(100))
+                    .andExpect(jsonPath("$.totalAccess").value(5000))
+                    .andExpect(jsonPath("$.customAliases").value(20));
         }
     }
 
@@ -365,6 +501,14 @@ class ShortLinkControllerExercise {
         void shouldHandleOptionsRequest() throws Exception {
             // TODO: 实现OPTIONS请求测试
             // 这是CORS相关的高级练习
+            mockMvc.perform(options(API_BASE_PATH) // 使用 options() 方法模拟 OPTIONS 请求
+                            .header("Origin", "https://another-domain.com") // 模拟请求来源域
+                            .header("Access-Control-Request-Method", "POST") // 询问是否允许POST方法
+                            .header("Access-Control-Request-Headers", "Content-Type")) // 询问是否允许Content-Type头
+                    .andExpect(status().isOk()) // 预检请求应该返回 200 OK
+                    .andExpect(header().string("Access-Control-Allow-Origin", "*"))
+                    .andExpect(header().string("Access-Control-Allow-Methods", containsString("POST")))
+                    .andExpect(header().string("Access-Control-Allow-Headers", containsString("Content-Type")));
         }
 
         /**
@@ -377,6 +521,16 @@ class ShortLinkControllerExercise {
         void shouldHandleAcceptHeader() throws Exception {
             // TODO: 实现Accept头测试
             // 测试application/json和text/plain等不同Accept值
+            // 场景1: 客户端明确表示接受JSON
+            when(shortLinkService.getShortLinkInfo(VALID_SHORT_CODE)).thenReturn(Optional.of(testShortLink));
+            mockMvc.perform(get(API_BASE_PATH + "/" + VALID_SHORT_CODE)
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk());
+
+            // 场景2: 客户端表示只接受XML，而我们的API不支持
+            mockMvc.perform(get(API_BASE_PATH + "/" + VALID_SHORT_CODE)
+                            .accept(MediaType.APPLICATION_XML))
+                    .andExpect(status().isNotAcceptable());
         }
     }
 
@@ -398,6 +552,15 @@ class ShortLinkControllerExercise {
             // TODO: 实现异常处理测试
             // Mock Service抛出异常
             // 验证错误响应格式
+            when(shortLinkService.createShortLink(anyString()))
+                    .thenThrow(new IllegalArgumentException("数据库宕机"));
+
+            String requestJson = "{\"longUrl\":\"" + VALID_LONG_URL + "\"}";
+
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestJson))
+                    .andExpect(status().isBadRequest());
         }
 
         /**
@@ -411,6 +574,14 @@ class ShortLinkControllerExercise {
             // TODO: 实现参数校验测试
             // 发送无效参数
             // 验证400错误和错误信息
+            String longUrl = "https://".repeat(200); // 构造一个超长URL
+            String longAlias = "a".repeat(30); // 构造一个超长别名
+            String requestJson = "{\"longUrl\":\"" + longUrl + "\", \"customAlias\":\"" + longAlias + "\"}";
+
+            mockMvc.perform(post(API_BASE_PATH)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestJson))
+                    .andExpect(status().isBadRequest()); // 预期 @Size 校验会失败，返回 400
         }
     }
 
@@ -421,7 +592,20 @@ class ShortLinkControllerExercise {
      */
     private ShortLink createTestShortLink() {
         // TODO: 创建并返回测试用的ShortLink对象
-        return null; // 替换为实际实现
+        ShortLink link = new ShortLink(VALID_LONG_URL, VALID_SHORT_CODE);
+        // 在测试中，我们经常需要模拟一个已经存在于数据库中的对象，所以手动设置ID和时间戳
+        try {
+            Field idField = ShortLink.class.getDeclaredField("id");
+            idField.setAccessible(true);
+            idField.set(link, 1L);
+
+            Field createdAtField = ShortLink.class.getDeclaredField("createdAt");
+            createdAtField.setAccessible(true);
+            createdAtField.set(link, LocalDateTime.now());
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            e.printStackTrace();
+        }
+        return link;
     }
 
     /**
@@ -432,6 +616,10 @@ class ShortLinkControllerExercise {
     private String asJsonString(Object obj) throws Exception {
         // TODO: 使用ObjectMapper将对象转换为JSON字符串
         // return objectMapper.writeValueAsString(obj);
-        return null; // 替换为实际实现
+        try {
+            return objectMapper.writeValueAsString(obj);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }
