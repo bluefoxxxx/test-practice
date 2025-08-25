@@ -221,7 +221,11 @@
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*Tests.java</include>
+                        <include>**/*Exercise.java</include>
                     </includes>
+                    <excludes>
+                        <exclude>**/advanced/*Exercise.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
 

@@ -8,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.*;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -209,6 +212,78 @@ class ShortLinkServiceExercise {
             assertThat(result.getShortCode()).isEqualTo(CUSTOM_ALIAS);
             assertThat(result.getIsCustomAlias()).isTrue();
         }
+
+        /**
+         * 测试无效URL格式，例如没有协议或格式错误
+         */
+        @Test
+        @DisplayName("格式错误的URL应该抛出异常")
+        void shouldThrowExceptionForMalformedUrl() {
+            String malformedUrl = "this-is-not-a-url";
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createShortLink(malformedUrl);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("无效的URL格式");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
+
+        /**
+         * 测试不支持的URL协议，例如ftp
+         */
+        @Test
+        @DisplayName("不支持的URL协议应该抛出异常")
+        void shouldThrowExceptionForUnsupportedProtocol() {
+            String unsupportedProtocolUrl = "ftp://example.com";
+            assertThatThrownBy(() -> {
+                shortLinkService.createShortLink(unsupportedProtocolUrl);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("仅支持HTTP和HTTPS协议的链接");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
+
+        /**
+         * 测试 longUrl 为 null 或空字符串的情况
+         */
+        @ParameterizedTest
+        @NullAndEmptySource
+        @DisplayName("null或空的URL应该抛出异常")
+        void shouldThrowExceptionForNullOrEmptyUrl(String emptyUrl) {
+            // When & Then
+            assertThatThrownBy(() -> {
+                shortLinkService.createShortLink(emptyUrl);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("长链接不能为空");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
+
+        /**
+         * 测试超长的 longUrl
+         */
+        @Test
+        @DisplayName("超长的URL应该抛出异常")
+        void shouldThrowExceptionForTooLongUrl() {
+            // 构造一个超过2048个字符的字符串
+            String tooLongUrl = "http://example.com/" + "a".repeat(2048);
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createShortLink(tooLongUrl);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("长链接长度不能超过2048字符");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
     }
 
     /**
@@ -349,6 +424,62 @@ class ShortLinkServiceExercise {
 
             verify(shortLinkRepository, never()).save(any(ShortLink.class));
         }
+
+        /**
+         * 测试使用系统保留词作为别名
+         */
+        @Test
+        @DisplayName("使用系统保留词作为别名应该抛出异常")
+        void shouldThrowExceptionForReservedAlias() {
+            String reservedAlias = "api"; // "api" 是一个系统保留词
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createCustomShortLink(VALID_LONG_URL, reservedAlias, "description");
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("自定义别名不能使用系统保留词");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
+
+        /**
+         * 测试超长的自定义别名
+         */
+        @Test
+        @DisplayName("超长的自定义别名应该抛出异常")
+        void shouldThrowExceptionForTooLongAlias() {
+            // 构造一个超过20个字符的别名
+            String tooLongAlias = "a".repeat(21);
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createCustomShortLink(VALID_LONG_URL, tooLongAlias, "description");
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("自定义别名长度不能超过20字符");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
+
+        /**
+         * 测试包含非法字符的自定义别名
+         */
+        @Test
+        @DisplayName("包含非法字符的自定义别名应该抛出异常")
+        void shouldThrowExceptionForInvalidAliasCharacters() {
+
+            String invalidCharAlias = "my-alias-!"; // 包含'-'和'!'等非法字符
+
+            assertThatThrownBy(() -> {
+                shortLinkService.createCustomShortLink(VALID_LONG_URL, invalidCharAlias, "description");
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("自定义别名只能包含数字、大小写字母");
+
+            // 验证数据库从未被接触
+            verify(shortLinkRepository, never()).save(any(ShortLink.class));
+        }
     }
 
     /**
@@ -440,6 +571,56 @@ class ShortLinkServiceExercise {
                     .isNotNull()
                     .isEmpty();
         }
+
+        /**
+         * 测试开始时间晚于结束时间的无效范围
+         */
+        @Test
+        @DisplayName("当开始时间晚于结束时间时应该抛出异常")
+        void shouldThrowExceptionWhenStartTimeIsAfterEndTime() {
+            // Given
+            LocalDateTime startTime = LocalDateTime.of(2025, 1, 1, 0, 0);
+            LocalDateTime endTime = LocalDateTime.of(2024, 12, 31, 23, 59); // 结束时间比开始时间早
+
+            // When & Then
+            assertThatThrownBy(() -> {
+                shortLinkService.getLinksCreatedBetween(startTime, endTime);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("开始时间不能晚于结束时间");
+
+            // 验证 repository 的相应方法从未被调用
+            verify(shortLinkRepository, never()).findByCreatedAtBetween(any(LocalDateTime.class), any(LocalDateTime.class));
+        }
+
+        /**
+         * 测试时间范围查询时参数为 null 的情况
+         */
+        @ParameterizedTest
+        @MethodSource("provideNullTimeArguments")
+        @DisplayName("当时间参数为null时应该抛出异常")
+        void shouldThrowExceptionForNullTimeArguments(LocalDateTime startTime, LocalDateTime endTime) {
+            assertThatThrownBy(() -> {
+                shortLinkService.getLinksCreatedBetween(startTime, endTime);
+            })
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("开始时间和结束时间不能为null");
+
+            // 验证 repository 的相应方法从未被调用
+            verify(shortLinkRepository, never()).findByCreatedAtBetween(any(LocalDateTime.class), any(LocalDateTime.class));
+        }
+
+        /**
+         * 为 a shouldThrowExceptionForNullTimeArguments 测试提供参数
+         */
+        private static Stream<Arguments> provideNullTimeArguments() {
+            LocalDateTime validTime = LocalDateTime.now();
+            return Stream.of(
+                    Arguments.of(null, validTime),
+                    Arguments.of(validTime, null),
+                    Arguments.of(null, null)
+            );
+        }
     }
 
     /**
@@ -486,5 +667,105 @@ class ShortLinkServiceExercise {
         ShortLink link = new ShortLink(longUrl, shortCode);
         ReflectionTestUtils.setField(link, "id", id);
         return link;
+    }
+
+    @Nested
+    @DisplayName("ShortLink 领域实体")
+    class ShortLinkEntityTests {
+
+        @Nested
+        @DisplayName("业务逻辑方法")
+        class BusinessLogicTests {
+
+            @Test
+            @DisplayName("isHotLink 应该根据访问次数返回正确结果")
+            void isHotLinkShouldReturnCorrectly() {
+                ShortLink link = new ShortLink("http://example.com", "abc");
+
+                link.setAccessCount(1000L);
+                assertThat(link.isHotLink()).as("访问次数为1000时不应是热点链接").isFalse();
+
+                link.setAccessCount(1001L);
+                assertThat(link.isHotLink()).as("访问次数超过1000时应是热点链接").isTrue();
+            }
+
+            @Test
+            @DisplayName("isSystemGenerated 应该根据别名类型返回正确结果")
+            void isSystemGeneratedShouldReturnCorrectly() {
+                ShortLink systemLink = new ShortLink("http://example.com", "abc");
+                assertThat(systemLink.isSystemGenerated()).as("默认创建的应是系统生成").isTrue();
+
+                ShortLink customLink = new ShortLink("http://example.com", "custom", "desc");
+                assertThat(customLink.isSystemGenerated()).as("自定义创建的不应是系统生成").isFalse();
+            }
+
+            @ParameterizedTest
+            @CsvSource({
+                    "http://test.com, http://test.com/s/abc",
+                    "https://test.com, https://test.com/s/abc",
+                    "test.com, https://test.com/s/abc", // 自动添加https
+                    "http://test.com/, http://test.com/s/abc" // 自动移除末尾的/
+            })
+            @DisplayName("generateFullShortUrl 应该能正确格式化URL")
+            void generateFullShortUrlShouldFormatCorrectly(String domain, String expectedUrl) {
+                ShortLink link = new ShortLink("http://example.com", "abc");
+                String fullUrl = link.generateFullShortUrl(domain);
+                assertThat(fullUrl).isEqualTo(expectedUrl);
+            }
+
+            @Test
+            @DisplayName("generateFullShortUrl 对null或空domain应该抛出异常")
+            void generateFullShortUrlShouldThrowExceptionForNullDomain() {
+                ShortLink link = new ShortLink("http://example.com", "abc");
+
+                assertThatThrownBy(() -> link.generateFullShortUrl(null))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("域名不能为空");
+
+                assertThatThrownBy(() -> link.generateFullShortUrl("   "))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("域名不能为空");
+            }
+        }
+
+        @Nested
+        @DisplayName("Object核心方法 (equals, hashCode, toString)")
+        class CoreObjectMethodTests {
+
+            @Test
+            @DisplayName("equals和hashCode应该基于shortCode")
+            void equalsAndHashCodeShouldBeBasedOnShortCode() {
+                ShortLink link1 = new ShortLink("http://a.com", "same-code");
+                ShortLink link2 = new ShortLink("http://b.com", "same-code");
+                ShortLink link3 = new ShortLink("http://a.com", "diff-code");
+
+                assertThat(link1).isEqualTo(link1); // 自反性
+                assertThat(link1).isEqualTo(link2); // 对称性
+                assertThat(link2).isEqualTo(link1);
+
+                assertThat(link1).isNotEqualTo(link3);
+                assertThat(link1).isNotEqualTo(null);
+                assertThat(link1).isNotEqualTo(new Object());
+
+                // hashCode契约
+                assertThat(link1.hashCode()).isEqualTo(link2.hashCode());
+            }
+
+            @Test
+            @DisplayName("toString应该包含关键信息")
+            void toStringShouldContainKeyInfo() {
+                ShortLink link = new ShortLink("http://example.com", "abc");
+                link.setAccessCount(100L);
+                // 手动设置一下其他字段以进行更完整的测试
+                link.setDescription("A test link");
+                link.setIsCustomAlias(true);
+                String str = link.toString();
+
+                assertThat(str).contains("shortCode='abc'")
+                        .contains("longUrl='http://example.com'")
+                        .contains("accessCount=100")
+                        .contains("isCustomAlias=true");
+            }
+        }
     }
 }
